@@ -239,12 +239,14 @@ void createProcess()
     int pid = fork();
     int pid_child;
     int child_status;
-    printf("fork \n");
+    int index;
     if (pid > 0) // Parent Server
     {
         int clientNum = 0;
         int state, addr_size;
         struct sockaddr_in serverAddr, clientAddr[MAX_CLIENT];
+        
+        printf("fork parent \n");
         
         if((listen_socketfd = socket(AF_INET, SOCK_STREAM, 0)) <0)
         {
@@ -285,31 +287,59 @@ void createProcess()
             printf("Accept Client %d\n", clientNum);
             clientNum++;
         }
-        printf("Parent waiting child die \n");
-        pid_child = wait(&child_status);
+        for(index = 0; index < MAX_CLIENT; index++)
+        {
+            pid_t terminatedChild = wait(&child_status);
+            if (WIFEXITED(child_status))
+            {
+                // The child process has termindated normally
+                printf("Child %d has terminated with exit status %d\n", terminatedChild, WEXITSTATUS(child_status));
+            }
+            else
+            {
+                printf("Child %d has terminated abnormally\n", terminatedChild);
+            }
+        }
+        //while(wait(&child_status) != pid)
+        //    continue;
+        //printf("Child Status: %d, %x \n", child_status, child_status);
         printf("Parent completed\n");
+        
     }
     else if (pid == 0) { // Child Client
         
         struct sockaddr_in serverAddr;
         pid_t pids[MAX_CLIENT];
         int clientNum = 0;
+        pid_t terminatedChild;
+        
+        printf("fork child\n");
         
         while(clientNum < MAX_CLIENT)
         {
-            sleep(10); // Give a delay to open a socket from the server
+            sleep(1); // Give a delay to open a socket from the server
             pids[clientNum] = fork();
+        
             
-            printf("Client %d start\n", clientNum);
-            
-            if (pids[clientNum] < 0)
+            if (pids[clientNum] > 0)
             {
-                printf("Create Client %d failed", clientNum);
-                exit(0);
+                terminatedChild = wait(&child_status);
+                
+                if (WIFEXITED(child_status))
+                {
+                    printf("Sub_Child %d has terminated with exit status %d\n", terminatedChild, WEXITSTATUS(child_status));
+                    exit(2);
+                }
+                else
+                {
+                    printf("Sub_Child %d has terminated abnormally\n", terminatedChild);
+                    exit(0);
+                }
             }
             else if (pids[clientNum] == 0)
             {
                 int sockfd;
+                printf("Client %d start\n", clientNum);
                 if((sockfd = socket(PF_INET, SOCK_STREAM,0)) < 0)
                 {
                     printf("Client %d socket failed \n", clientNum);
@@ -326,11 +356,16 @@ void createProcess()
                     exit(0);
                 }
             }
+            else
+            {
+                printf("Create Client %d failed", clientNum);
+                exit(0);
+            }
             
             clientNum++;
             
         }
-        exit(0);
+        exit(2);
     }
     else
     {
