@@ -234,103 +234,183 @@ bool write_then_fill(void)
 #define IPADDR "127.0.0.1"
 int listen_socketfd, client_socketfd[MAX_CLIENT];
 
+void writeDataToClient()
+{
+    uint64_t data = 0x12345678;
+    printf("Write Data to Client \n");
+    write(client_socketfd[0],(void*)&data, sizeof(data));
+}
+
+void ServerProcess()
+{
+    //int pid_child;
+    int child_status;
+    int index;
+    int state, addr_size;
+    struct sockaddr_in serverAddr, clientAddr[MAX_CLIENT];
+    int clientNum = 1;
+    
+    printf("fork parent \n");
+    
+    if((listen_socketfd = socket(AF_INET, SOCK_STREAM, 0)) <0)
+    {
+        printf("socket error \n");
+        exit(0);
+    }
+    
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    serverAddr.sin_port = htons(1234);
+    
+    state = bind(listen_socketfd, (struct sockaddr*)&serverAddr, sizeof(serverAddr));
+    if(state == -1)
+    {
+        printf("bind error \n");
+        exit(0);
+    }
+    
+    printf("start listen \n");
+    state = listen(listen_socketfd, MAX_CLIENT);
+    if(state == -1)
+    {
+        printf("listen error \n");
+        exit(0);
+    }
+    
+    addr_size = sizeof(clientAddr[clientNum]);
+    while(clientNum < MAX_CLIENT)
+    {
+        client_socketfd[clientNum] = accept(listen_socketfd, (struct sockaddr *)&clientAddr[clientNum], &addr_size);
+        
+        if(client_socketfd[clientNum] == -1)
+        {
+            printf("Access error clientNum %d\n", clientNum);
+            exit(0);
+        }
+        
+        printf("Accept Client %d\n", clientNum);
+        clientNum++;
+    }
+    //for(index = 0; index < MAX_CLIENT; index++)
+    //{
+    //    pid_t terminatedChild = wait(&child_status);
+    //    if (WIFEXITED(child_status))
+    //    {
+            // The child process has termindated normally
+    //        printf("Child %d has terminated with exit status %d\n", terminatedChild, WEXITSTATUS(child_status));
+    //    }
+    //    else
+    //    {
+    //        printf("Child %d has terminated abnormally\n", terminatedChild);
+    //    }
+    //}
+    //while(wait(&child_status) != pid)
+    //    continue;
+    //printf("Child Status: %d, %x \n", child_status, child_status);
+    printf("Parent completed\n");
+}
+
+void ClientProcess(int currentNum)
+{
+    int child_status;
+    struct sockaddr_in serverAddr;
+    pid_t pids[MAX_CLIENT];
+    pid_t terminatedChild;
+    int clientNum = (currentNum+1);
+    
+    printf("fork child clientNum %d\n", clientNum);
+    
+    while(clientNum < MAX_CLIENT)
+    {
+        sleep(1); // Give a delay to open a socket from the server
+        pids[clientNum] = fork();
+    
+        
+        if (pids[clientNum] > 0)
+        {
+            printf("child_parent clientNum %d \n", clientNum);
+            ClientProcess(clientNum);
+            
+            while((terminatedChild = wait(&child_status)) == -1);
+            
+            if (WIFEXITED(child_status))
+            {
+                printf("Sub_Child %d has terminated with exit status %d\n", terminatedChild, WEXITSTATUS(child_status));
+                exit(2);
+            }
+            else
+            {
+                printf("Sub_Child %d has terminated abnormally\n", terminatedChild);
+                exit(0);
+            }
+        }
+        else if (pids[clientNum] == 0)
+        {
+            int sockfd;
+            printf("Client %d start\n", clientNum);
+            if((sockfd = socket(PF_INET, SOCK_STREAM,0)) < 0)
+            {
+                printf("Client %d socket failed \n", clientNum);
+                exit(0);
+            }
+            serverAddr.sin_addr.s_addr = inet_addr(IPADDR);
+            serverAddr.sin_family = AF_INET;
+            serverAddr.sin_port = htons(1234);
+            
+            printf("Connect to Server from client %d \n", clientNum);
+            if(connect(sockfd, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0)
+            {
+                printf("Client %d connect failed \n", clientNum);
+                exit(0);
+            }
+            while(1)
+            {
+                int length;
+                char data[8];
+               
+                memset(data,0x0,sizeof(data));
+                
+                printf("------ read wait \n");
+                length = read(sockfd,(void*)&data,sizeof(data));
+                if(length < 0)
+                {
+                    printf("----- read error\n");
+                    printf("----- Socket close\n");
+                    close(sockfd);
+                    exit(0);
+                }
+                else if(length == 0)
+                {
+                    printf("----no data\n");
+                    sleep(3);
+                }
+                else
+                {
+                    printf ("Read data %lx\n", data);
+                }
+                
+            }
+        }
+        else
+        {
+            printf("Create Client %d failed", clientNum);
+            exit(0);
+        }
+        
+    }
+    exit(2);
+}
+
 void createProcess()
 {
     int pid = fork();
-    int pid_child;
-    int child_status;
-    printf("fork \n");
     if (pid > 0) // Parent Server
     {
-        int clientNum = 0;
-        int state, addr_size;
-        struct sockaddr_in serverAddr, clientAddr[MAX_CLIENT];
-        
-        if((listen_socketfd = socket(AF_INET, SOCK_STREAM, 0)) <0)
-        {
-            printf("socket error \n");
-            exit(0);
-        }
-        
-        serverAddr.sin_family = AF_INET;
-        serverAddr.sin_addr.s_addr = htonl(INADDR_ANY);
-        serverAddr.sin_port = htons(1234);
-        
-        state = bind(listen_socketfd, (struct sockaddr*)&serverAddr, sizeof(serverAddr));
-        if(state == -1)
-        {
-            printf("bind error \n");
-            exit(0);
-        }
-        
-        printf("start listen \n");
-        state = listen(listen_socketfd, MAX_CLIENT);
-        if(state == -1)
-        {
-            printf("listen error \n");
-            exit(0);
-        }
-        
-        addr_size = sizeof(clientAddr[clientNum]);
-        while(clientNum < MAX_CLIENT)
-        {
-            client_socketfd[clientNum] = accept(listen_socketfd, (struct sockaddr *)&clientAddr[clientNum], &addr_size);
-            
-            if(client_socketfd[clientNum] == -1)
-            {
-                printf("Access error \n");
-                exit(0);
-            }
-            
-            printf("Accept Client %d\n", clientNum);
-            clientNum++;
-        }
-        printf("Parent waiting child die \n");
-        pid_child = wait(&child_status);
-        printf("Parent completed\n");
+        ServerProcess();
     }
     else if (pid == 0) { // Child Client
         
-        struct sockaddr_in serverAddr;
-        pid_t pids[MAX_CLIENT];
-        int clientNum = 0;
-        
-        while(clientNum < MAX_CLIENT)
-        {
-            sleep(10); // Give a delay to open a socket from the server
-            pids[clientNum] = fork();
-            
-            printf("Client %d start\n", clientNum);
-            
-            if (pids[clientNum] < 0)
-            {
-                printf("Create Client %d failed", clientNum);
-                exit(0);
-            }
-            else if (pids[clientNum] == 0)
-            {
-                int sockfd;
-                if((sockfd = socket(PF_INET, SOCK_STREAM,0)) < 0)
-                {
-                    printf("Client %d socket failed \n", clientNum);
-                    exit(0);
-                }
-                serverAddr.sin_addr.s_addr = inet_addr(IPADDR);
-                serverAddr.sin_family = AF_INET;
-                serverAddr.sin_port = htons(1234);
-                
-                printf("Connect to Server from client %d \n", clientNum);
-                if(connect(sockfd, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0)
-                {
-                    printf("Client %d connect failed \n", clientNum);
-                    exit(0);
-                }
-            }
-            
-            clientNum++;
-            
-        }
-        exit(0);
+        ClientProcess(-1);
     }
     else
     {
@@ -357,6 +437,7 @@ int main(int argc, char *argv[])
     RUN_TEST(write_then_fill(), "write_then_fill");
     reset();    //reset the system so we can run another test
     
+    writeDataToClient();
     //printf("Write data to clients\n");
     //RUN_TEST(wite_data_to_client(), "wite_data_to_client");
     
