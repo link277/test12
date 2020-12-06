@@ -9,7 +9,7 @@
  */
 
 #ifndef _DISTRIBUTION_H
-#define _DISTRIBUTION_H
+#define _DISTRIBUTION_H 
 
 #define NUM_DATA_BLOCKS 10
 #define BLOCK_MAX_WRITES 10

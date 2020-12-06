@@ -1,6 +1,14 @@
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/socket.h>
+#include <signal.h>
+#include <unistd.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <stdlib.h>
+#include <string.h>
 #include <stdio.h>
 #include <stdbool.h>
-#include <string.h>
 #include "distribution.h"
 #include "datablock.h"
 
@@ -222,9 +230,119 @@ bool write_then_fill(void)
     return true;
 }
 
+#define MAX_CLIENT 10
+#define IPADDR "127.0.0.1"
+int listen_socketfd, client_socketfd[MAX_CLIENT];
+
+void createProcess()
+{
+    int pid = fork();
+    int pid_child;
+    int child_status;
+    printf("fork \n");
+    if (pid > 0) // Parent Server
+    {
+        int clientNum = 0;
+        int state, addr_size;
+        struct sockaddr_in serverAddr, clientAddr[MAX_CLIENT];
+        
+        if((listen_socketfd = socket(AF_INET, SOCK_STREAM, 0)) <0)
+        {
+            printf("socket error \n");
+            exit(0);
+        }
+        
+        serverAddr.sin_family = AF_INET;
+        serverAddr.sin_addr.s_addr = htonl(INADDR_ANY);
+        serverAddr.sin_port = htons(1234);
+        
+        state = bind(listen_socketfd, (struct sockaddr*)&serverAddr, sizeof(serverAddr));
+        if(state == -1)
+        {
+            printf("bind error \n");
+            exit(0);
+        }
+        
+        printf("start listen \n");
+        state = listen(listen_socketfd, MAX_CLIENT);
+        if(state == -1)
+        {
+            printf("listen error \n");
+            exit(0);
+        }
+        
+        addr_size = sizeof(clientAddr[clientNum]);
+        while(clientNum < MAX_CLIENT)
+        {
+            client_socketfd[clientNum] = accept(listen_socketfd, (struct sockaddr *)&clientAddr[clientNum], &addr_size);
+            
+            if(client_socketfd[clientNum] == -1)
+            {
+                printf("Access error \n");
+                exit(0);
+            }
+            
+            printf("Accept Client %d\n", clientNum);
+            clientNum++;
+        }
+        printf("Parent waiting child die \n");
+        pid_child = wait(&child_status);
+        printf("Parent completed\n");
+    }
+    else if (pid == 0) { // Child Client
+        
+        struct sockaddr_in serverAddr;
+        pid_t pids[MAX_CLIENT];
+        int clientNum = 0;
+        
+        while(clientNum < MAX_CLIENT)
+        {
+            sleep(10); // Give a delay to open a socket from the server
+            pids[clientNum] = fork();
+            
+            printf("Client %d start\n", clientNum);
+            
+            if (pids[clientNum] < 0)
+            {
+                printf("Create Client %d failed", clientNum);
+                exit(0);
+            }
+            else if (pids[clientNum] == 0)
+            {
+                int sockfd;
+                if((sockfd = socket(PF_INET, SOCK_STREAM,0)) < 0)
+                {
+                    printf("Client %d socket failed \n", clientNum);
+                    exit(0);
+                }
+                serverAddr.sin_addr.s_addr = inet_addr(IPADDR);
+                serverAddr.sin_family = AF_INET;
+                serverAddr.sin_port = htons(1234);
+                
+                printf("Connect to Server from client %d \n", clientNum);
+                if(connect(sockfd, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0)
+                {
+                    printf("Client %d connect failed \n", clientNum);
+                    exit(0);
+                }
+            }
+            
+            clientNum++;
+            
+        }
+        exit(0);
+    }
+    else
+    {
+        printf("failed to fork\n");
+    }
+}
+
 
 int main(int argc, char *argv[])
 {
+    int index = 0;
+    createProcess();
     initialize();
 
     printf("Testing a single write/read and bit conversion\n");
@@ -238,6 +356,15 @@ int main(int argc, char *argv[])
     printf("Testing write before fill\n");
     RUN_TEST(write_then_fill(), "write_then_fill");
     reset();    //reset the system so we can run another test
+    
+    //printf("Write data to clients\n");
+    //RUN_TEST(wite_data_to_client(), "wite_data_to_client");
+    
+    close(listen_socketfd);
+    for(index = 0; index < MAX_CLIENT; index++)
+    {
+        close(client_socketfd[index]);
+    }
 
     return 0;
 }
