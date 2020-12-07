@@ -1,10 +1,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <sys/socket.h>
 #include <signal.h>
 #include <unistd.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -85,7 +82,7 @@ bool basic_write_read(void)
     if (command != expected)
     {
         printf("ERROR: basic_write_read: Retrieved data does not match expected data\n");
-        printf("ERROR: basic_write_read: Actual: %lx, Expected: %lx\n", command, expected);
+        printf("ERROR: basic_write_read: Actual: %llx, Expected: %llx\n", command, expected);
         return false;
     }
     
@@ -151,7 +148,7 @@ bool repeated_write(void)
         if (command != expected)
         {
             printf("ERROR: repeated_write: Retrieved data does not match expected data\n");
-            printf("ERROR: repeated_write: Actual: %lx, Expected: %lx\n", command, expected);
+            printf("ERROR: repeated_write: Actual: %llx, Expected: %llx\n", command, expected);
             return false;
         }
     }
@@ -230,224 +227,22 @@ bool write_then_fill(void)
     return true;
 }
 
-#define MAX_CLIENT 2
-#define IPADDR "127.0.0.1"
-int listen_socketfd, client_pipe[MAX_CLIENT][2],server_pipe[MAX_CLIENT][2], pid[MAX_CLIENT];
-char buf[255];
-
-int childProcess(int index)
+bool write_data_to_child()
 {
-    int nbyte = 0;
-    uint64_t command;
-    status_e status;
-    
-    while(1)
-    {
-        sleep(1);
-        nbyte = read(client_pipe[index][0],buf,255);
-        if(nbyte > 0)
-        {
-            if(strcmp(buf,"bye") == 0)
-            {
-                printf("Child process %d done",index);
-                exit(2);
-            }
-            command = (uint64_t)strtol(buf, NULL,0);
-            printf("Receive : index %d buff %s, command %lx\n", index, buf,command);
-            status = process_command(&command);
-            if (status != SUCCESS)
-            {
-                printf("ERROR: Error writing to command %lx. Failed with %d\n", command, (int)status);
-                return false;
-            }
-            write(server_pipe[index][1],"Done",6);
-        }
-        else if(nbyte < 0)
-        {
-            printf("client index % close pipe \n", index);
-            exit(2);
-        }
-    }
+    createCommand();
     
     return true;
 }
 
-void createProcess()
+bool read_data_from_child()
 {
-    int index = 0;
-    int pipe_status = 0;
-    
-    printf("createProcess\n");
-    for(index = 0; index < MAX_CLIENT; index++)
-    {
-        if((pipe_status = pipe(client_pipe[index])) == -1)
-        {
-            printf("Pipe error index %d\n", index);
-            exit(1);
-        }
-        if((pipe_status = pipe(server_pipe[index])) == -1)
-        {
-            printf("Pipe error index %d\n", index);
-            exit(1);
-        }
-        
-        pid[index] = fork();
-        if ( pid[index] == 0)
-        {
-            printf("fork child %d\n",index);
-            childProcess(index);
-        }
-        else if ( pid == -1)
-        {
-            printf("failed to fork\n");
-            exit(0);
-        }
-        
-    }
-#if 0
-    int numByte;
-    int index2;
-    printf("Parent \n");
-    //while(1)
-    {
-        
-        memset(buf, 0x00, 255);
-        for(index2 = 0; index2 < MAX_CLIENT; index2++)
-        {
-            //numByte = read(fd[index2][0], buf, 255);
-            //if(numByte > 0)
-            //{
-            //    printf("receive from index %d, data : %s \n",index2, buf);
-            //}
-            write(fd[index2][1],"Data",6);
-            close(fd[index2][0]);
-            close(fd[index2][1]);
-            sleep(1);
-            printf("kill child %d\n",pid[index2]);
-            kill(pid[index2], SIGINT);
-        }
-        
-    }
-#endif
-    
+    return confirmCommand();
 }
 
-void childHandler()
-{
-    int childPid, childState;
-    childPid = wait(&childState);
-    printf("Child %d terminated\n", childPid);
-}
-
-uint64_t command[MAX_CLIENT * NUM_DATA_BLOCKS];
-
-void createCommand()
-{
-    int data;
-    int index;
-    int comId;
-    
-    for (index = 0; index < (MAX_CLIENT * NUM_DATA_BLOCKS); index++ )
-    {
-        data = index;
-        comId = CMD_WRITE;
-        command[index] = (((uint64_t)data && 0xFFFFFFFF) << 10 | (index & 0x7F) << 3 | (comId & 0x7));
-    }
-}
-
-int commandRoute(uint64_t command)
-{
-    int clientIndex;
-    status_e status;
-    
-    clientIndex = ((command >> 3) & 0x7F);
-    //printf("ClientIndex before divide 10 = %d \n", clientIndex);
-    clientIndex /= NUM_DATA_BLOCKS;
-    //printf("ClientIndex after divide 10 = %d \n", clientIndex);
-    
-    if(clientIndex == 0)
-    {
-        status = process_command(&command);
-        if (status != SUCCESS)
-        {
-            printf("ERROR: Error writing to command %lx. Failed with %d\n", command, (int)status);
-            return false;
-        }
-    }
-    else if(clientIndex == 1)
-    {
-        int cmdId = (command & 0x7);
-        if(cmdId == CMD_WRITE)
-        {
-            sprintf(buf, "0x%lx",command);
-            printf("Send :data to clientIndex %d data : %s\n", clientIndex, buf);
-            write(client_pipe[clientIndex-1][1],buf,255);
-            while(1)
-            {
-                int recevLength = read(server_pipe[clientIndex-1][0],buf,255);
-                if(recevLength > 0)
-                {
-                    printf("Confirm Client %d recieved\n",clientIndex);
-                    break;
-                }
-                sleep(1);
-            }
-        }
-    }
-    
-    return clientIndex;
-    
-}
-
-void write_data_to_child()
-{
-    int index;
-    int clientIndex;
-    int nbyte;
-    //int data
-    //uint64_t command = 0x286cb0f502a;
-    
-    createCommand();
-    
-    for(index = 0; index < (MAX_CLIENT * NUM_DATA_BLOCKS); index++)
-    {
-        clientIndex = commandRoute(command[index]);
-        //printf("index %d clientIndex %d \n", index, clientIndex);
-    }
-    
-    
-    //sprintf(buf,"%lx",command);
-    
-    //printf("buf data : %s\n",buf);
-    
-    //int clientIndex = command
-    //for(index = 0; index < MAX_CLIENT; index++)
-    //{
-    //    write(client_pipe[index][1],"0x286cb0f502a",13);
-    //}
-    
-    while(1)
-    {
-        for(index = 0; index < MAX_CLIENT; index++)
-        {
-            nbyte = read(server_pipe[index][0],buf,255);
-            if(nbyte > 0)
-            {
-                printf("Done from client %d\n",index);
-                kill(pid[index],SIGINT);
-            }
-        }
-    }
-    
-}
 
 int main(int argc, char *argv[])
 {
-    int index = 0;
-    //char* string = "0x286cb0f502a";
-    //uint64_t command = (uint64_t)
-    signal(SIGCHLD,childHandler);
-    createProcess();
+
     initialize();
 
     printf("Testing a single write/read and bit conversion\n");
@@ -462,7 +257,12 @@ int main(int argc, char *argv[])
     RUN_TEST(write_then_fill(), "write_then_fill");
     reset();    //reset the system so we can run another test
     
-    write_data_to_child();
+    printf("Testing write to clients\n");
+    RUN_TEST(write_data_to_child(), "write_data_to_child");
+    
+    printf("Testing read data from clients\n");
+    RUN_TEST(read_data_from_child(), "read_data_from_child");
+    finishChilren();
 
     return 0;
 }

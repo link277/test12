@@ -31,4 +31,11 @@ void reset(void);
 uint32_t get_write_counter(int index);
 void dump_blocks(void);
 
+int childProcess(int index);
+void createProcess(void);
+void createCommand(void);
+status_e commandRoute(uint64_t* command);
+void finishChilren(void);
+bool confirmCommand(void);
+
 #endif //_DISTRIBUTION_H
