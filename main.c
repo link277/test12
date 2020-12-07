@@ -235,10 +235,11 @@ bool write_then_fill(void)
 int listen_socketfd, client_pipe[MAX_CLIENT][2],server_pipe[MAX_CLIENT][2], pid[MAX_CLIENT];
 char buf[255];
 
-void childProcess(int index)
+int childProcess(int index)
 {
     int nbyte = 0;
     uint64_t command;
+    status_e status;
     
     while(1)
     {
@@ -246,8 +247,19 @@ void childProcess(int index)
         nbyte = read(client_pipe[index][0],buf,255);
         if(nbyte > 0)
         {
+            if(strcmp(buf,"bye") == 0)
+            {
+                printf("Child process %d done",index);
+                exit(2);
+            }
             command = (uint64_t)strtol(buf, NULL,0);
-            printf("index %d buff %s, command %lx\n", index, buf,command);
+            printf("Receive : index %d buff %s, command %lx\n", index, buf,command);
+            status = process_command(&command);
+            if (status != SUCCESS)
+            {
+                printf("ERROR: Error writing to command %lx. Failed with %d\n", command, (int)status);
+                return false;
+            }
             write(server_pipe[index][1],"Done",6);
         }
         else if(nbyte < 0)
@@ -257,8 +269,7 @@ void childProcess(int index)
         }
     }
     
-
-    exit(2);
+    return true;
 }
 
 void createProcess()
@@ -328,14 +339,92 @@ void childHandler()
     printf("Child %d terminated\n", childPid);
 }
 
+uint64_t command[MAX_CLIENT * NUM_DATA_BLOCKS];
+
+void createCommand()
+{
+    int data;
+    int index;
+    int comId;
+    
+    for (index = 0; index < (MAX_CLIENT * NUM_DATA_BLOCKS); index++ )
+    {
+        data = index;
+        comId = CMD_WRITE;
+        command[index] = (((uint64_t)data && 0xFFFFFFFF) << 10 | (index & 0x7F) << 3 | (comId & 0x7));
+    }
+}
+
+int commandRoute(uint64_t command)
+{
+    int clientIndex;
+    status_e status;
+    
+    clientIndex = ((command >> 3) & 0x7F);
+    //printf("ClientIndex before divide 10 = %d \n", clientIndex);
+    clientIndex /= NUM_DATA_BLOCKS;
+    //printf("ClientIndex after divide 10 = %d \n", clientIndex);
+    
+    if(clientIndex == 0)
+    {
+        status = process_command(&command);
+        if (status != SUCCESS)
+        {
+            printf("ERROR: Error writing to command %lx. Failed with %d\n", command, (int)status);
+            return false;
+        }
+    }
+    else if(clientIndex == 1)
+    {
+        int cmdId = (command & 0x7);
+        if(cmdId == CMD_WRITE)
+        {
+            sprintf(buf, "0x%lx",command);
+            printf("Send :data to clientIndex %d data : %s\n", clientIndex, buf);
+            write(client_pipe[clientIndex-1][1],buf,255);
+            while(1)
+            {
+                int recevLength = read(server_pipe[clientIndex-1][0],buf,255);
+                if(recevLength > 0)
+                {
+                    printf("Confirm Client %d recieved\n",clientIndex);
+                    break;
+                }
+                sleep(1);
+            }
+        }
+    }
+    
+    return clientIndex;
+    
+}
+
 void write_data_to_child()
 {
     int index;
+    int clientIndex;
     int nbyte;
-    for(index = 0; index < MAX_CLIENT; index++)
+    //int data
+    //uint64_t command = 0x286cb0f502a;
+    
+    createCommand();
+    
+    for(index = 0; index < (MAX_CLIENT * NUM_DATA_BLOCKS); index++)
     {
-        write(client_pipe[index][1],"0x286cb0f502a",11);
+        clientIndex = commandRoute(command[index]);
+        //printf("index %d clientIndex %d \n", index, clientIndex);
     }
+    
+    
+    //sprintf(buf,"%lx",command);
+    
+    //printf("buf data : %s\n",buf);
+    
+    //int clientIndex = command
+    //for(index = 0; index < MAX_CLIENT; index++)
+    //{
+    //    write(client_pipe[index][1],"0x286cb0f502a",13);
+    //}
     
     while(1)
     {
